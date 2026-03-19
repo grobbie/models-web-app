@@ -21,14 +21,14 @@ export class SubmitFormComponent implements OnInit {
   deployForm: FormGroup;
 
   frameworks = [
-    { value: 'sklearn', viewValue: 'Scikit-learn' },
-    { value: 'tensorflow', viewValue: 'TensorFlow' },
-    { value: 'pytorch', viewValue: 'PyTorch' },
-    { value: 'xgboost', viewValue: 'XGBoost' },
-    { value: 'huggingface', viewValue: 'HuggingFace' },
-    { value: 'onnx', viewValue: 'ONNX' },
-    { value: 'triton', viewValue: 'Triton' },
-    { value: 'custom', viewValue: 'Custom' },
+    { value: 'sklearn', viewValue: $localize`Scikit-learn` },
+    { value: 'tensorflow', viewValue: $localize`TensorFlow` },
+    { value: 'pytorch', viewValue: $localize`PyTorch` },
+    { value: 'xgboost', viewValue: $localize`XGBoost` },
+    { value: 'huggingface', viewValue: $localize`HuggingFace` },
+    { value: 'onnx', viewValue: $localize`ONNX` },
+    { value: 'triton', viewValue: $localize`Triton` },
+    { value: 'custom', viewValue: $localize`Custom` },
   ];
 
   constructor(
@@ -85,7 +85,7 @@ export class SubmitFormComponent implements OnInit {
     if (v.minReplicas > v.maxReplicas) {
       const config: SnackBarConfig = {
         data: {
-          msg: `Min replicas (${v.minReplicas}) cannot exceed max replicas (${v.maxReplicas})`,
+          msg: $localize`Min replicas (${v.minReplicas}) cannot exceed max replicas (${v.maxReplicas})`,
           snackType: SnackType.Error,
         },
         duration: 8000,
@@ -145,7 +145,7 @@ export class SubmitFormComponent implements OnInit {
       next: () => {
         const config: SnackBarConfig = {
           data: {
-            msg: 'InferenceService created successfully.',
+            msg: $localize`InferenceService created successfully.`,
             snackType: SnackType.Success,
           },
           duration: 3000,
@@ -155,7 +155,7 @@ export class SubmitFormComponent implements OnInit {
         this.navigateBack();
       },
       error: err => {
-        let errorMsg = 'Failed to create InferenceService';
+        let errorMsg = $localize`Failed to create InferenceService`;
 
         if (err?.error?.log) {
           errorMsg = err.error.log;
@@ -166,7 +166,7 @@ export class SubmitFormComponent implements OnInit {
         } else if (typeof err?.error === 'string') {
           errorMsg = err.error;
         } else if (err?.statusText) {
-          errorMsg = `Server error: ${err.statusText}`;
+          errorMsg = $localize`Server error: ${err.statusText}`;
         }
 
         const config: SnackBarConfig = {
