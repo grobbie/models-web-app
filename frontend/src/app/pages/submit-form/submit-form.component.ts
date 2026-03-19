@@ -1,12 +1,12 @@
 import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
+import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import {
   NamespaceService,
   SnackBarConfig,
   SnackBarService,
   SnackType,
 } from 'kubeflow';
-import { load } from 'js-yaml';
 import { InferenceServiceK8s } from 'src/app/types/kfserving/v1beta1';
 import { MWABackendService } from 'src/app/services/backend.service';
 
@@ -16,16 +16,52 @@ import { MWABackendService } from 'src/app/services/backend.service';
   styleUrls: ['./submit-form.component.scss'],
 })
 export class SubmitFormComponent implements OnInit {
-  yaml = '';
   namespace!: string;
   applying = false;
+  deployForm: FormGroup;
+
+  frameworks = [
+    { value: 'sklearn', viewValue: 'Scikit-learn' },
+    { value: 'tensorflow', viewValue: 'TensorFlow' },
+    { value: 'pytorch', viewValue: 'PyTorch' },
+    { value: 'xgboost', viewValue: 'XGBoost' },
+    { value: 'huggingface', viewValue: 'HuggingFace' },
+    { value: 'onnx', viewValue: 'ONNX' },
+    { value: 'triton', viewValue: 'Triton' },
+    { value: 'custom', viewValue: 'Custom' },
+  ];
 
   constructor(
     private router: Router,
     private namespaceService: NamespaceService,
     private snack: SnackBarService,
     private backend: MWABackendService,
-  ) {}
+    private fb: FormBuilder,
+  ) {
+    this.deployForm = this.fb.group({
+      modelName: [
+        '',
+        [
+          Validators.required,
+          Validators.pattern('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'),
+        ],
+      ],
+      modelFramework: ['', Validators.required],
+      frameworkVersion: [''],
+      storageUri: [
+        '',
+        [Validators.required, Validators.pattern('^(gs|s3|https?|pvc)://.*')],
+      ],
+      runtime: [''],
+      minReplicas: [1, [Validators.min(0), Validators.max(100)]],
+      maxReplicas: [1, [Validators.min(1), Validators.max(100)]],
+      gpuCount: [0, [Validators.min(0), Validators.max(16)]],
+      cpuRequest: [''],
+      cpuLimit: [''],
+      memoryRequest: [''],
+      memoryLimit: [''],
+    });
+  }
 
   ngOnInit() {
     this.namespaceService.getSelectedNamespace().subscribe(namespace => {
@@ -38,39 +74,18 @@ export class SubmitFormComponent implements OnInit {
   }
 
   submit() {
-    this.applying = true;
-
-    let customResource: InferenceServiceK8s;
-    try {
-      customResource = load(this.yaml) as InferenceServiceK8s;
-    } catch (e) {
-      let msg = 'Could not parse the provided YAML';
-
-      if (e instanceof Error && e.message) {
-        const lineMatch = e.message.match(/line (\d+)/);
-        if (lineMatch) {
-          msg = `YAML parsing error at line ${lineMatch[1]}: ${e.message}`;
-        } else {
-          msg = `YAML parsing error: ${e.message}`;
-        }
-      }
-
-      const config: SnackBarConfig = {
-        data: {
-          msg,
-          snackType: SnackType.Error,
-        },
-        duration: 16000,
-      };
-      this.snack.open(config);
-      this.applying = false;
+    if (this.deployForm.invalid) {
+      this.deployForm.markAllAsTouched();
       return;
     }
 
-    if (!customResource) {
+    this.applying = true;
+    const v = this.deployForm.value;
+
+    if (v.minReplicas > v.maxReplicas) {
       const config: SnackBarConfig = {
         data: {
-          msg: 'YAML is empty or invalid',
+          msg: `Min replicas (${v.minReplicas}) cannot exceed max replicas (${v.maxReplicas})`,
           snackType: SnackType.Error,
         },
         duration: 8000,
@@ -80,45 +95,51 @@ export class SubmitFormComponent implements OnInit {
       return;
     }
 
-    const validationErrors: string[] = [];
+    const customResource: any = {
+      apiVersion: 'serving.kserve.io/v1beta1',
+      kind: 'InferenceService',
+      metadata: {
+        name: v.modelName,
+        namespace: this.namespace,
+      },
+      spec: {
+        predictor: {
+          minReplicas: v.minReplicas,
+          maxReplicas: v.maxReplicas,
+          model: {
+            modelFormat: {
+              name: v.modelFramework,
+            },
+            storageUri: v.storageUri,
+          },
+        },
+      },
+    };
 
-    if (!customResource.apiVersion) {
-      validationErrors.push('Missing required field: apiVersion');
-    }
-    if (!customResource.kind || customResource.kind !== 'InferenceService') {
-      validationErrors.push(
-        'Missing or invalid field: kind (must be "InferenceService")',
+    if (v.frameworkVersion) {
+      customResource.spec.predictor.model.modelFormat.version = String(
+        v.frameworkVersion,
       );
     }
-    if (!customResource.metadata) {
-      validationErrors.push('Missing required field: metadata');
-    } else {
-      if (!customResource.metadata.name) {
-        validationErrors.push('Missing required field: metadata.name');
-      }
-    }
-    if (!customResource.spec) {
-      validationErrors.push('Missing required field: spec');
-    } else {
-      if (!customResource.spec.predictor) {
-        validationErrors.push('Missing required field: spec.predictor');
-      }
+    if (v.runtime) {
+      customResource.spec.predictor.model.runtime = v.runtime;
     }
 
-    if (validationErrors.length > 0) {
-      const config: SnackBarConfig = {
-        data: {
-          msg: validationErrors.join(' | '),
-          snackType: SnackType.Error,
-        },
-        duration: 16000,
-      };
-      this.snack.open(config);
-      this.applying = false;
-      return;
-    }
+    const resources: any = {};
+    const requests: any = {};
+    const limits: any = {};
 
-    customResource.metadata!.namespace = this.namespace;
+    if (v.cpuRequest) requests.cpu = v.cpuRequest;
+    if (v.memoryRequest) requests.memory = v.memoryRequest;
+    if (v.cpuLimit) limits.cpu = v.cpuLimit;
+    if (v.memoryLimit) limits.memory = v.memoryLimit;
+    if (v.gpuCount > 0) limits['nvidia.com/gpu'] = String(v.gpuCount);
+
+    if (Object.keys(requests).length > 0) resources.requests = requests;
+    if (Object.keys(limits).length > 0) resources.limits = limits;
+    if (Object.keys(resources).length > 0) {
+      customResource.spec.predictor.model!.resources = resources;
+    }
 
     this.backend.postInferenceService(customResource).subscribe({
       next: () => {
